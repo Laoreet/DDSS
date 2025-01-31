@@ -17,7 +17,7 @@
 
 1. Клонируйте репозиторий:
     ```
-    git clone <URL>
+    git clone [<URL>](https://github.com/Laoreet/DDSS.git)
     cd src
     ```
 
