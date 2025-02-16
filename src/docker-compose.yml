@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  web:
+    build: .
+    ports:
+      - "80:80"
+    depends_on:
+      - db
+    environment:
+      - DATABASE_URL=postgresql://user:password@db:5432/hse_ddss_brain
+
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: hse_ddss_brain
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db_init/dump.sql:/docker-entrypoint-initdb.d/brain_dump.sql  # Монтируем SQL-дамп
+    ports:
+      - "5432:5432"
+
+volumes:
+  postgres_data:

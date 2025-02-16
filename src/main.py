@@ -1,71 +1,58 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Form
 from pydantic import BaseModel
 from typing import List
+import asyncpg
+from datetime import datetime
+from infrastructure.ct_series_repository_sql import PostgreSQLCTSeriesRepository
+from domain.aggregates.ct_series_aggregate import CTSeriesAggregate
+from domain.entities.ct_series import CTSeries
+from utils.base_uuid import BaseId
 import os
-import uuid
-import torch
-from utils.dicom_utils import get_proections, get_dcm_serie
-from utils.dicom_utils import get_stacked_structures_from_dicom, preprocess_series
-from utils.model_utils import MedicalNet, get_attention_map_base64
 
 app = FastAPI()
 
-# Глобальные переменные
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:123321a@localhost:5432/hse_ddss_brain")
 UPLOAD_FOLDER = "uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 
-# Модель для ответа
-class UploadResponse(BaseModel):
+async def get_db_connection():
+    connection = await asyncpg.connect(DATABASE_URL)
+    try:
+        yield connection
+    finally:
+        await connection.close()
+
+
+# Pydantic модель для входящих данных
+class CTSeriesCreate(BaseModel):
+    patient_id: str
+    status: str
+    # files: List[UploadFile]
+
+
+class CTSeriesResponse(BaseModel):
     id: str
+    patient_id: str
+    upload_date: str
     status: str
 
 
-class ResultResponse(BaseModel):
-    id: str
-    status: str
-    hemorrhage_probability: float
+@app.post("/ct_series/", response_model=CTSeriesResponse)
+async def create_ct_series(patient_id: str = Form(...), status: str = Form(...), files: List[UploadFile] = File(...), db=Depends(get_db_connection)):
+    ct_series_id = BaseId()  # Генерация нового ID
+    ct_series_aggregate = CTSeriesAggregate(
+        ct_series=CTSeries(
+            id=ct_series_id,
+            patient_id=patient_id,
+            upload_date=datetime.now(),
+            status=status,
+        )
+    )
+    repository = PostgreSQLCTSeriesRepository(db)
 
-
-class ProjectionsResponse(BaseModel):
-    axial: str
-    coronal: str
-    sagittal: str
-
-
-class AttentionMapResponse(BaseModel):
-    attention_map: str
-
-
-class DeleteResponse(BaseModel):
-    status: str
-
-
-class UpdateResponse(BaseModel):
-    id: str
-    comment: str
-
-
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-# Загрузка модели
-model = MedicalNet().to(device)
-try:
-    model_dict = torch.load(r'models\final_checkpoint_good_preprocess.pth')
-    model.load_state_dict(model_dict['model_state_dict'])
-except Exception:
-    model = MedicalNet().to(device)
-# model.eval()
-
-
-@app.post("/upload", response_model=UploadResponse)
-async def upload_files(files: List[UploadFile] = File(...)):
-    if not files:
-        raise HTTPException(status_code=400, detail={"error": "Bad Request",
-                                                     "message": "No files provided."})
-
-    study_id = str(uuid.uuid4())
-    study_folder = os.path.join(UPLOAD_FOLDER, study_id)
+    # Сохраняем сами наши файлы дикомовские
+    study_folder = os.path.join(UPLOAD_FOLDER, str(ct_series_aggregate.ct_series.id))
     os.makedirs(study_folder, exist_ok=True)
 
     for file in files:
@@ -79,104 +66,48 @@ async def upload_files(files: List[UploadFile] = File(...)):
         with open(file_path, "wb") as f:
             f.write(await file.read())
 
-    return UploadResponse(id=study_id, status="processing")
+    await repository.save(ct_series_aggregate)
+    return CTSeriesResponse(id=str(ct_series_id), patient_id=patient_id, upload_date=str(ct_series_aggregate.ct_series.upload_date), status=ct_series_aggregate.ct_series.status)
 
 
-@app.get("/results/{id}", response_model=ResultResponse)
-async def get_results(id: str):
-    study_folder = os.path.join(UPLOAD_FOLDER, id)
-    if not os.path.exists(study_folder):
-        raise HTTPException(status_code=404, detail=f"Study with ID '{id}' not found.")
-
-    series = get_dcm_serie(study_folder)
-    stacked_structures = get_stacked_structures_from_dicom(series)
-    preprocessed_serie = preprocess_series(stacked_structures)
-    input_ct = torch.tensor(preprocessed_serie, dtype=torch.float32)
-    input_ct = input_ct.unsqueeze(0).to(device)
-
-    with torch.no_grad():
-        output = model(input_ct)
-
-    hemorrhage_probability = output.item()
-
-    return ResultResponse(id=id, status="completed",
-                          hemorrhage_probability=hemorrhage_probability)
-
-
-@app.get("/projections/{id}", response_model=ProjectionsResponse)
-async def get_projections(id: str):
-    study_folder = os.path.join(UPLOAD_FOLDER, id)
-    if not os.path.exists(study_folder):
-        raise HTTPException(status_code=404, detail=f"Study with ID '{id}' not found.")
-
-    series = get_dcm_serie(study_folder)
-    axial_image, coronal_image, sagittal_image = get_proections(series)
-
-    return ProjectionsResponse(axial=axial_image,
-                               coronal=coronal_image, sagittal=sagittal_image)
-
-
-@app.get("/attention-maps/{id}", response_model=AttentionMapResponse)
-async def get_attention_maps(id: str):
-    study_folder = os.path.join(UPLOAD_FOLDER, id)
-    if not os.path.exists(study_folder):
-        raise HTTPException(status_code=404, detail=f"Study with ID '{id}' not found.")
-    series = get_dcm_serie(study_folder)
-    stacked_structures = get_stacked_structures_from_dicom(series)
-    preprocessed_serie = preprocess_series(stacked_structures)
-    input_ct = torch.tensor(preprocessed_serie, dtype=torch.float32)
-    input_ct = input_ct.unsqueeze(0).to(device)
-    attention_map_base64 = get_attention_map_base64(model, input_ct)
-
-    return AttentionMapResponse(attention_map=attention_map_base64)
-
-
-@app.delete("/results/{id}", response_model=DeleteResponse)
-async def delete_results(id: str):
-    study_folder = os.path.join(UPLOAD_FOLDER, id)
-    if not os.path.exists(study_folder):
-        raise HTTPException(status_code=404, detail=f"Study with ID '{id}' not found.")
-
-    os.rmdir(study_folder)
-    return DeleteResponse(status="deleted")
-
-
-@app.put("/results/{id}", response_model=UpdateResponse)
-async def update_results(id: str, comment: str):
-    study_folder = os.path.join(UPLOAD_FOLDER, id)
-    if not os.path.exists(study_folder):
-        raise HTTPException(status_code=404, detail=f"Study with ID '{id}' not found.")
-
-    # Обновление метаданных (например, добавление комментария врача)
-    # Пока что пусть будет в формате .txt
-    metadata_file = os.path.join(study_folder, "metadata.txt")
-    with open(metadata_file, "w") as f:
-        f.write(comment)
-
-    return UpdateResponse(id=id, comment=comment)
-
-
-# Обработчики ошибок
-@app.exception_handler(400)
-async def bad_request_exception_handler(request: Request, exc: HTTPException):
-    return JSONResponse(
-        status_code=400,
-        content={"error": "Bad Request", "message": exc.detail},
+@app.get("/ct_series/{ct_series_id}", response_model=CTSeriesResponse)
+async def read_ct_series(ct_series_id: str, db=Depends(get_db_connection)):
+    repository = PostgreSQLCTSeriesRepository(db)
+    ct_series_aggregate = await repository.find_by_id(ct_series_id)
+    if not ct_series_aggregate:
+        raise HTTPException(status_code=404, detail="CT Series not found")
+    return CTSeriesResponse(
+        id=str(ct_series_aggregate.ct_series.id),
+        patient_id=ct_series_aggregate.ct_series.patient_id,
+        upload_date=str(ct_series_aggregate.ct_series.upload_date),
+        status=ct_series_aggregate.ct_series.status,
     )
 
 
-@app.exception_handler(404)
-async def not_found_exception_handler(request: Request, exc: HTTPException):
-    return JSONResponse(
-        status_code=404,
-        content={"error": "Not Found", "message": exc.detail},
+@app.put("/ct_series/{ct_series_id}", response_model=CTSeriesResponse)
+async def update_ct_series(ct_series_id: str, ct_series: CTSeriesCreate, db=Depends(get_db_connection)):
+    repository = PostgreSQLCTSeriesRepository(db)
+    ct_series_aggregate = await repository.find_by_id(ct_series_id)
+    if not ct_series_aggregate:
+        raise HTTPException(status_code=404, detail="CT Series not found")
+
+    ct_series_aggregate.ct_series.patient_id = ct_series.patient_id
+    ct_series_aggregate.ct_series.status = ct_series.status
+    await repository.update(ct_series_aggregate)
+
+    return CTSeriesResponse(
+        id=str(ct_series_aggregate.ct_series.id),
+        patient_id=ct_series_aggregate.ct_series.patient_id,
+        upload_date=str(ct_series_aggregate.ct_series.upload_date),
+        status=ct_series_aggregate.ct_series.status,
     )
 
 
-@app.exception_handler(500)
-async def internal_server_error_exception_handler(request: Request, exc: HTTPException):
-    return JSONResponse(
-        status_code=500,
-        content={"error": "Internal Server Error",
-                 "message": "An unexpected error occurred. Please try again later."},
-    )
+@app.delete("/ct_series/{ct_series_id}")
+async def delete_ct_series(ct_series_id: str, db=Depends(get_db_connection)):
+    repository = PostgreSQLCTSeriesRepository(db)
+    ct_series_aggregate = await repository.find_by_id(ct_series_id)
+    if not ct_series_aggregate:
+        raise HTTPException(status_code=404, detail="CT Series not found")
+
+    return {"detail": "CT Series deleted successfully"}
