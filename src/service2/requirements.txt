@@ -1,0 +1,10 @@
+fastapi==0.115.8
+matplotlib==3.10.0
+numpy==2.2.3
+opencv_python_headless==4.11.0.86
+Pillow==11.1.0
+pydantic==2.10.6
+pydicom==3.0.1
+torch==2.6.0
+torchvision==0.21.0
+uvicorn

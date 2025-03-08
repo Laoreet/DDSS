@@ -1,26 +1,22 @@
 version: '3.8'
 
 services:
-  web:
-    build: .
+  service1:
+    image: src-service1  # Явное имя образа
+    build: ./service1
     ports:
-      - "80:80"
-    depends_on:
-      - db
+      - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql://user:password@db:5432/hse_ddss_brain
-
-  db:
-    image: postgres:17
-    environment:
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: hse_ddss_brain
+      - SERVICE2_URL=http://service2:8001
     volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./db_init/dump.sql:/docker-entrypoint-initdb.d/brain_dump.sql  # Монтируем SQL-дамп
-    ports:
-      - "5432:5432"
+      - ./service1/uploads:/app/uploads
 
-volumes:
-  postgres_data:
+  service2:
+    image: src-service2  # Явное имя образа
+    build: ./service2
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./service1/uploads:/app/uploads  # Упрощённый путь
+      - ./service2/models:/app/models
+      - ./service2/utils:/app/utils
