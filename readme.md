@@ -17,8 +17,8 @@
 
 1. Клонируйте репозиторий:
     ```
-    git clone <URL>
-    cd <DDSS>
+    git clone https://github.com/Laoreet/DDSS.git
+    cd src
     ```
 
 2. Создайте виртуальное окружение:
