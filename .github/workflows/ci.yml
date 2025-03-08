@@ -1,0 +1,88 @@
+name: CI for Lab Work 2
+
+on:
+  push:
+    branches:
+      - lab2
+    paths:
+      - "src/**"
+  pull_request:
+    branches:
+      - lab2
+    paths:
+      - "src/**"
+  workflow_dispatch:  # Для ручного запуска
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          ref: lab2  # Переключаемся на ветку с новым кодом
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.12"
+
+      - name: Set up Docker
+        uses: docker/setup-buildx-action@v2
+
+      - name: Install Docker Compose
+        run: |
+          sudo curl -L "https://github.com/docker/compose/releases/download/v2.20.0/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+          sudo chmod +x /usr/local/bin/docker-compose
+
+      - name: Install dependencies
+        working-directory: src
+        run: |
+          ls
+          python -m pip install --upgrade pip
+          pip install pytest httpx pytest-asyncio
+    
+      - name: Build Docker image for service 1
+        working-directory: src/service1
+        run: |
+          docker build -t src-service1 .
+          docker images
+
+      - name: Build Docker image for service 2
+        working-directory: src/service2
+        run: |
+          docker build -t src-service2 .
+          docker images
+
+      - name: Wait for services to start
+        run: |
+          sleep 30  # Ждем 10 секунд
+
+      - name: List Docker images
+        run: |
+          docker images
+
+      # Шаг 6: Запуск сервисов с помощью Docker Compose
+      - name: Start services with Docker Compose
+        working-directory: src
+        run: |
+          docker-compose up -d
+
+      # Шаг 7: Ожидание запуска сервисов
+      - name: Wait for services to start
+        run: |
+          sleep 15  # Ждем 10 секунд
+
+      # Шаг 8: Запуск интеграционных тестов
+      - name: Run integration tests
+        working-directory: src
+        run: |
+          pytest
+
+      # Шаг 9: Остановка сервисов (даже если тесты завершились с ошибкой)
+      - name: Stop services
+        if: always()
+        working-directory: src
+        run: |
+          docker-compose down
