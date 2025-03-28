@@ -1,16 +1,16 @@
-name: CI for Lab Work №5 (src)
+name: CI for DDSS (src)
 
 on:
   push:
     branches:
-      - LabWork5
+      - lab3
     paths:
-      - "Lab Work №5/src/**"
+      - "lab3/src/**"
   pull_request:
     branches:
-      - LabWork5
+      - lab3
     paths:
-      - "Lab Work №5/src/**"
+      - "lab3/src/**"
   workflow_dispatch:  # Для ручного запуска
 
 jobs:
@@ -35,7 +35,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
         with:
-          ref: lab2  # Переключаемся на ветку с новым кодом
+          ref: lab3  # Переключаемся на ветку с новым кодом
 
       - name: Set up Python
         uses: actions/setup-python@v4
