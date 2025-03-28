@@ -5,7 +5,7 @@ import os
 import uuid
 import httpx
 
-app = FastAPI()
+app = FastAPI(title="Service 1")
 
 UPLOAD_FOLDER = "uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)

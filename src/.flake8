@@ -1,5 +1,6 @@
 [flake8]
-max-line-length = 99
-exclude =
-    .git,
-    __pycache__,
+exclude = .git,__pycache__,venv
+ignore = E,F,W,C,N
+max-line-length = 999
+per-file-ignores =
+    *:ALL

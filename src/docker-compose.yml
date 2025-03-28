@@ -1,13 +1,22 @@
 version: '3.8'
 
 services:
+  redis:
+      image: redis:alpine
+      ports:
+        - "6379:6379"
+      volumes:
+        - redis_data:/data
   service1:
     image: src-service1  # Явное имя образа
     build: ./service1
     ports:
       - "8000:8000"
+    depends_on:
+      - redis
     environment:
       - SERVICE2_URL=http://service2:8001
+      - REDIS_URL=redis://redis:6379
     volumes:
       - ./service1/uploads:/app/uploads
 
@@ -16,7 +25,14 @@ services:
     build: ./service2
     ports:
       - "8001:8001"
+    depends_on:
+      - redis
     volumes:
       - ./service1/uploads:/app/uploads  # Упрощённый путь
       - ./service2/models:/app/models
       - ./service2/utils:/app/utils
+    environment:
+      - REDIS_URL=redis://redis:6379
+
+volumes:
+  redis_data: 

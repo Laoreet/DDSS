@@ -4,8 +4,10 @@ import os
 import torch
 from utils.dicom_utils import get_dcm_serie, get_stacked_structures_from_dicom, preprocess_series, get_proections
 from utils.model_utils import MedicalNet, get_attention_map_base64
+from redis_config import init_redis
+from fastapi_cache.decorator import cache
 
-app = FastAPI()
+app = FastAPI(title='Service 2')
 
 # Глобальные переменные
 UPLOAD_FOLDER = "uploads"  # Путь к папке с загруженными файлами
@@ -47,6 +49,9 @@ model = MedicalNet().to(device)
 #     model = MedicalNet().to(device)
 model.eval()
 
+@app.on_event("startup")
+async def startup_event():
+    await init_redis()
 
 @app.post("/process", response_model=ProcessResponse)
 async def process_files(request: ProcessRequest):
@@ -72,6 +77,7 @@ async def process_files(request: ProcessRequest):
 
 
 @app.get("/results/{id}", response_model=ResultResponse)
+@cache(expire=360)
 async def get_results(id: str):
     study_folder = os.path.join(UPLOAD_FOLDER, id)
     if not os.path.exists(study_folder):
@@ -92,6 +98,7 @@ async def get_results(id: str):
 
 
 @app.get("/projections/{id}", response_model=ProjectionsResponse)
+@cache(expire=360)
 async def get_projections(id: str):
     study_folder = os.path.join(UPLOAD_FOLDER, id)
     if not os.path.exists(study_folder):
@@ -104,6 +111,7 @@ async def get_projections(id: str):
 
 
 @app.get("/attention-maps/{id}", response_model=AttentionMapResponse)
+@cache(expire=360)
 async def get_attention_maps(id: str):
     study_folder = os.path.join(UPLOAD_FOLDER, id)
     if not os.path.exists(study_folder):
